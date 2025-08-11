@@ -1,101 +1,182 @@
+#!/usr/bin/env python3
+
 """
     Simulated Symmetric vs Asymmetric Crypto for IPsec
 
-    1. Simulates IKE asymmetric crypto (RSA, ECDSA).
+    1.  Simulates IKE asymmetric crypto (RSA, ECDSA).
 	2.	Simulates ESP symmetric crypto (AES-GCM, ChaCha20-Poly1305).
 	3.	Measures “handshake” time (asymmetric-heavy) vs. “data transfer” time (symmetric-heavy) in simulation mode.
 	4.	Works similarly to the Basic Protocol Testing script we did earlier, but without requiring root/IPsec kernel configuration.
 	5.	Lets you run tunnel vs. transport mode variants too.
+    Simulates asymmetric (IKE) and symmetric (ESP) crypto effects for IPsec.
+    Produces per-test CSV and summary JSON, and prints a pretty table.
+
+Usage:
+    ipsec_crypto_sim.py --data-size 200 --seed 42 --output-csv ipsec_crypto.csv
+    ipsec_crypto_sim.py --data-size 300 --seed 42 --handshake-factor 1.1 --throttle-factor 0.9
 """
 
-
-import time
-import random
+import argparse
 import csv
+import json
+import random
+import time
 from datetime import datetime
+import os
+import math
 
-# -----------------------------
-# Simulation parameters
-# -----------------------------
-ASYM_CRYPTO_HANDSHAKE = {
-    "RSA-2048": 0.8,      # seconds
-    "RSA-4096": 1.6,
-    "ECDSA-P256": 0.3,
-    "ECDSA-P384": 0.5
+# Default parameters (can be overridden via CLI)
+DEFAULTS = {
+    "asyms": {
+        "RSA-2048": 0.8,
+        "RSA-4096": 1.6,
+        "ECDSA-P256": 0.3,
+        "ECDSA-P384": 0.5
+    },
+    "syms": {
+        "AES-GCM-128": 500,      # MB/s
+        "AES-GCM-256": 450,
+        "ChaCha20-Poly1305": 480
+    },
+    "modes": ["Tunnel", "Transport"],
+    "data_size_mb": 200,
+    "seed": None,
+    "output_csv": "ipsec_crypto_results.csv",
+    "summary_json": "ipsec_crypto_summary.json"
 }
 
-SYM_CRYPTO_SPEED_MBPS = {
-    "AES-GCM-128": 500,   # MB/sec simulated
-    "AES-GCM-256": 450,
-    "ChaCha20-Poly1305": 480
-}
+# ---------------------------------------
+# Simulation primitives
+# ---------------------------------------
+def now_ts():
+    return datetime.now().isoformat()
 
-IPSEC_MODES = ["Tunnel", "Transport"]
+def simulate_handshake(alg, base_map, handshake_factor=1.0):
+    """Return simulated handshake time (seconds)."""
+    base = base_map.get(alg, 0.5)
+    # factor may be used to scale handshake times globally
+    jitter = random.uniform(-0.1 * base, 0.1 * base)
+    t = max(0.01, (base * handshake_factor) + jitter)
+    # keep it snappy
+    time.sleep(min(t, 1.2))
+    return round(t, 3)
 
-# -----------------------------
-# Simulated encryption workload
-# -----------------------------
-def simulate_symmetric_encryption(crypto_algo, data_size_mb):
-    """Simulate encryption time based on throughput."""
-    speed = SYM_CRYPTO_SPEED_MBPS[crypto_algo]
-    encrypt_time = data_size_mb / speed
-    time.sleep(encrypt_time)
-    return encrypt_time
+def simulate_encrypt_time(alg, sym_map, data_mb, throttle_factor=1.0):
+    """Return simulated symmetric encryption time (seconds) for data_mb."""
+    throughput = sym_map.get(alg, 300) * throttle_factor  # MB/s
+    t = data_mb / throughput
+    jitter = random.uniform(-0.03 * t, 0.05 * t)
+    total = max(0.001, t + jitter)
+    time.sleep(min(total, 2.5))
+    return round(total, 3)
 
-def simulate_asymmetric_handshake(crypto_algo):
-    """Simulate handshake/auth delay."""
-    delay = ASYM_CRYPTO_HANDSHAKE[crypto_algo]
-    time.sleep(delay)
-    return delay
+# ---------------------------------------
+# Results helpers
+# ---------------------------------------
+CSV_FIELDS = ["timestamp","mode","ike_alg","esp_alg","data_mb","handshake_s","encrypt_s","total_s","throughput_MBps"]
 
-# -----------------------------
-# Main simulation
-# -----------------------------
-def run_simulation(data_size_mb=100):
-    results = []
-    for mode in IPSEC_MODES:
-        for ike_crypto in ASYM_CRYPTO_HANDSHAKE.keys():
-            for esp_crypto in SYM_CRYPTO_SPEED_MBPS.keys():
-                print(f"\n[TEST] Mode: {mode}, IKE: {ike_crypto}, ESP: {esp_crypto}")
+def write_csv_rows(path, rows):
+    write_header = not os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        if write_header:
+            writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
 
-                handshake_time = simulate_asymmetric_handshake(ike_crypto)
-                encrypt_time = simulate_symmetric_encryption(esp_crypto, data_size_mb)
+def aggregate_summary(rows, out_json):
+    # Aggregate by ike_alg+esp_alg+mode
+    stats = {}
+    for r in rows:
+        key = (r["mode"], r["ike_alg"], r["esp_alg"])
+        kstr = "|".join(key)
+        stats.setdefault(kstr, {"count":0, "total_time":0.0, "total_throughput":0.0, "min_throughput":math.inf, "max_throughput":0.0})
+        stats[kstr]["count"] += 1
+        stats[kstr]["total_time"] += float(r["total_s"])
+        stats[kstr]["total_throughput"] += float(r["throughput_MBps"])
+        tp = float(r["throughput_MBps"])
+        stats[kstr]["min_throughput"] = min(stats[kstr]["min_throughput"], tp)
+        stats[kstr]["max_throughput"] = max(stats[kstr]["max_throughput"], tp)
+    # Convert to nice JSON structure
+    out = {}
+    for k, v in stats.items():
+        mode, ike, esp = k.split("|")
+        out.setdefault(mode, {})
+        out[mode].setdefault(ike, {})
+        out[mode][ike][esp] = {
+            "count": v["count"],
+            "avg_time_s": round(v["total_time"]/v["count"], 3),
+            "avg_throughput_MBps": round(v["total_throughput"]/v["count"], 3),
+            "min_throughput_MBps": round(v["min_throughput"], 3),
+            "max_throughput_MBps": round(v["max_throughput"], 3)
+        }
+    with open(out_json, "w") as f:
+        json.dump(out, f, indent=2)
+    return out
 
-                total_time = handshake_time + encrypt_time
-                throughput_mbps = data_size_mb / total_time
+def print_pretty_summary(summary):
+    print("\n=== Simulation Summary ===")
+    for mode, ike_map in summary.items():
+        print(f"\nMode: {mode}")
+        for ike_alg, esp_map in ike_map.items():
+            for esp_alg, s in esp_map.items():
+                print(f"  IKE={ike_alg:12s} | ESP={esp_alg:20s} | avg_tp={s['avg_throughput_MBps']:8.2f} MB/s | avg_time={s['avg_time_s']:6.3f}s | n={s['count']}")
 
-                print(f"  Handshake Time: {handshake_time:.3f}s")
-                print(f"  Encrypt Time: {encrypt_time:.3f}s for {data_size_mb} MB")
-                print(f"  Total Time: {total_time:.3f}s")
-                print(f"  Throughput: {throughput_mbps:.2f} MB/s")
+# ---------------------------------------
+# Orchestrator
+# ---------------------------------------
+def run_simulation(args):
+    # Configure RNG
+    if args.seed is not None:
+        random.seed(args.seed)
+    else:
+        random.seed()
 
-                results.append({
-                    "timestamp": datetime.now().isoformat(),
+    asym_map = DEFAULTS["asyms"]
+    sym_map = DEFAULTS["syms"]
+    modes = DEFAULTS["modes"]
+
+    rows = []
+    for mode in modes:
+        for ike_alg in asym_map.keys():
+            for esp_alg in sym_map.keys():
+                handshake = simulate_handshake(ike_alg, asym_map, handshake_factor=args.handshake_factor)
+                encrypt = simulate_encrypt_time(esp_alg, sym_map, args.data_size, throttle_factor=args.throttle_factor)
+                total = round(handshake + encrypt, 3)
+                throughput = round(args.data_size / total, 3) if total > 0 else 0.0
+                row = {
+                    "timestamp": now_ts(),
                     "mode": mode,
-                    "ike_crypto": ike_crypto,
-                    "esp_crypto": esp_crypto,
-                    "data_size_mb": data_size_mb,
-                    "handshake_time_s": handshake_time,
-                    "encrypt_time_s": encrypt_time,
-                    "total_time_s": total_time,
-                    "throughput_MBps": throughput_mbps
-                })
+                    "ike_alg": ike_alg,
+                    "esp_alg": esp_alg,
+                    "data_mb": args.data_size,
+                    "handshake_s": handshake,
+                    "encrypt_s": encrypt,
+                    "total_s": total,
+                    "throughput_MBps": throughput
+                }
+                rows.append(row)
+                print(f"[{now_ts()}] mode={mode} IKE={ike_alg} ESP={esp_alg} total_s={total} tp={throughput}MB/s")
+    # write CSV
+    write_csv_rows(args.output_csv, rows)
+    # generate summary JSON and print
+    summary = aggregate_summary(rows, args.summary_json)
+    print_pretty_summary(summary)
+    print(f"\nWrote {len(rows)} rows to {args.output_csv} and summary to {args.summary_json}")
 
-    save_results(results)
+# ---------------------------------------
+# CLI
+# ---------------------------------------
+def parse_args():
+    p = argparse.ArgumentParser(description="IPSec crypto sim (asymmetric vs symmetric) - macOS simulation")
+    p.add_argument("--data-size", type=int, default=DEFAULTS["data_size_mb"], help="Data size in MB for encryption simulation")
+    p.add_argument("--seed", type=int, default=DEFAULTS["seed"], help="Random seed (optional)")
+    p.add_argument("--output-csv", default=DEFAULTS["output_csv"], help="CSV output file")
+    p.add_argument("--summary-json", default=DEFAULTS["summary_json"], help="Summary JSON output file")
+    p.add_argument("--handshake-factor", type=float, default=1.0, help="Scale factor to multiply handshake times (simulates slower/faster IKE)")
+    p.add_argument("--throttle-factor", type=float, default=1.0, help="Scale factor to multiply symmetric throughput (simulate loaded crypto engine)")
+    return p.parse_args()
 
-# -----------------------------
-# Save results
-# -----------------------------
-def save_results(results, filename="ipsec_crypto_results.csv"):
-    keys = results[0].keys()
-    with open(filename, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(results)
-    print(f"\n[INFO] Results saved to {filename}")
-
-# -----------------------------
-# Entry point
-# -----------------------------
 if __name__ == "__main__":
-    run_simulation(data_size_mb=200)  # You can change test size here
+    args = parse_args()
+    run_simulation(args)
