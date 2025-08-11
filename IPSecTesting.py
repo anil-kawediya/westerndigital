@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-1: Basic Protocol Functionality as discussed:
-	•	Tunnel vs Transport mode
-	•	Multiple ESP cipher/auth combos (parametrized)
-	•	SA negotiation checks and rekey mid-I/O
-	•	Inbound vs outbound flow checks (write → read, verify)
-	•	Anti-replay tests via packet loss / reorder (using tc netem)
-	•	Uses fio for storage I/O and verifies checksums to detect corruption
-
+Basic Protocol Functionality as discussed:
+ - Tunnel vs Transport mode
+ - Multiple ESP cipher/auth combos (parametrized)
+ - SA negotiation checks and rekey mid-I/O
+ - Inbound vs outbound flow checks (write → read, verify)
+ - Anti-replay tests via packet loss / reorder (using tc netem)
+ - Uses fio for storage I/O and verifies checksums to detect corruption
 
 Prereqs & warnings:
  - Linux, run as root (script enforces).
