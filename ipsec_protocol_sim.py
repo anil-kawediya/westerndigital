@@ -1,21 +1,17 @@
-
 #!/usr/bin/env python3
 
 """
-What it simulates:
-	•	Tunnel vs Transport mode
-	•	Multiple ESP cipher suites (simulated AES-GCM, AES-CBC+HMAC, ChaCha20-Poly1305)
-	•	IKE (SA) negotiation and rekey events (asymmetric handshake delays are optionally simulated)
-	•	Inbound vs outbound flows (read-after-write verification simulated)
-	•	Anti-replay behavior under packet loss/reorder (simulated effects)
-	•	SA lifetime expiry and rekey during active I/O
-	•	Produces a CSV with structured results and prints progress logs
-    •	Simulated Basic Protocol IPsec tests (Tunnel vs Transport + ESP suites + IKE algs)
-
+What it simulates
+- Tunnel vs Transport mode
+- Multiple ESP cipher suites (simulated AES-GCM, AES-CBC+HMAC, ChaCha20-Poly1305)
+- IKE (SA) negotiation and rekey events (asymmetric handshake delays are optionally simulated)
+- Inbound vs outbound flows (read-after-write verification simulated)
+- Anti-replay behavior under packet loss/reorder (simulated effects)
+- SA lifetime expiry and rekey during active I/O
+- Produces a CSV with structured results and prints progress logs
+- Simulated Basic Protocol IPsec tests (Tunnel vs Transport + ESP suites + IKE algs)
 How to run:
-	
-	Edit SIM_PARAMS at top or pass command-line flags (script includes CLI flags) to change data size, runtime, or random seed.
-
+- Edit SIM_PARAMS at top or pass command-line flags (script includes CLI flags) to change data size, runtime, or random seed.
 Usage:
     ipsec_protocol_sim.py --data-size 200 --seed 123 --output-csv ipsec_protocol.csv
 """
