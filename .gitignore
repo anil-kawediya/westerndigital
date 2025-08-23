@@ -1,6 +1,7 @@
+*.git*
 *.csv
 *.json
 error_edge_cases_results.csv
 firmware_upgrade_results.csv
 perf_resource_results.csv
-
+NVMe_Output.txt
