@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 storage_nvme_tests.py
 
@@ -430,6 +428,6 @@ if __name__ == "__main__":
     print(f"\nAll results logged to {log_file}")
 
     
-"""print
+"""
     
   
