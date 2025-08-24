@@ -3,6 +3,35 @@
 """
 sa_resource_exhaustion_linux.py
 
+You’re right—so far we didn’t cover firmware/resource exhaustion (e.g., running out of IPsec SA slots). Here’s a Linux-only harness that adds SAs in a loop (with paired policies) until the stack/firmware refuses new entries. It records the max successful SA pairs, optional policy exhaustion, and can cleanup afterwards. Every function includes an example of the final command(s) it constructs.
+
+⚠️ Dangerous on shared hosts: creating lots of SAs/policies can impact connectivity and memory. Use in a lab, as root.
+Requires: iproute2 (ip xfrm), Python 3.
+- Works with manual SAs (no IKE).
+- Supports transport or tunnel mode.
+- Each SA pair uses a unique SPI and reqid.
+- You can run until failure (--until-fail) or cap attempts (--max-pairs).
+- Optional policy attach per SA pair (on by default) to mimic real use.
+
+
+How this addresses resource exhaustion
+Loops SA creation with unique SPIs and (optionally) unique reqids per pair, which many firmwares track against resource pools.
+Can attach policies per pair so you’re exercising state + policy tables together (often distinct resource pools).
+Stops on first failure (or after --max-pairs) and prints the error returned by ip xfrm/driver (e.g., “No buffer space available”, “Resource temporarily unavailable”), which you can correlate with firmware logs.
+Key variance (--vary-key) cheaply modifies the hex keys (or GCM salt) per SA pair to avoid dedupe in strict stacks.
+Where to plug into your broader plan
+Run this after your IPsec bring-up sanity (ping/fio) to avoid masking basic misconfig issues.
+If you want to observe impact during creation, you can, in another shell, run:
+ > watch -n1 'ip -s xfrm state show'
+ > watch -n1 'ip -s xfrm policy show'
+ > dmesg -w
+
+For tunnel mode, you’ll likely reuse the same subnets across all pairs; the unique reqid ties each policy template to the correct state pair on selection.
+If you want, I can:
+Add a CSV/JSON report of pair counts vs. time and the exact error string.
+Add a small traffic check (ping/fio) every N pairs to see when performance degrades, not only when creation fails.
+
+Expose a parallelism option (spawn processes that add blocks of pairs concurrently) to stress firmware allocation races.
 Purpose:
   Probe firmware/kernel/driver IPsec resource limits by creating many ESP SAs
   (and matching policies) until the system refuses new entries, then report the
