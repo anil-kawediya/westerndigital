@@ -3,9 +3,7 @@
 """
 sa_resource_exhaustion_linux.py
 
-You’re right—so far we didn’t cover firmware/resource exhaustion (e.g., running out of IPsec SA slots). Here’s a Linux-only harness that adds SAs in a loop (with paired policies) until the stack/firmware refuses new entries. It records the max successful SA pairs, optional policy exhaustion, and can cleanup afterwards. Every function includes an example of the final command(s) it constructs.
-
-⚠️ Dangerous on shared hosts: creating lots of SAs/policies can impact connectivity and memory. Use in a lab, as root.
+Dangerous on shared hosts: creating lots of SAs/policies can impact connectivity and memory. Use in a lab, as root.
 Requires: iproute2 (ip xfrm), Python 3.
 - Works with manual SAs (no IKE).
 - Supports transport or tunnel mode.
@@ -25,11 +23,6 @@ If you want to observe impact during creation, you can, in another shell, run:
  > watch -n1 'ip -s xfrm state show'
  > watch -n1 'ip -s xfrm policy show'
  > dmesg -w
-
-For tunnel mode, you’ll likely reuse the same subnets across all pairs; the unique reqid ties each policy template to the correct state pair on selection.
-If you want, I can:
-Add a CSV/JSON report of pair counts vs. time and the exact error string.
-Add a small traffic check (ping/fio) every N pairs to see when performance degrades, not only when creation fails.
 
 Expose a parallelism option (spawn processes that add blocks of pairs concurrently) to stress firmware allocation races.
 Purpose:

@@ -223,7 +223,7 @@ def scenario_tls_connect_and_io(args):
       5) fio mixed I/O against raw device
       6) disconnect
 
-    Example sequence:
+    Example sequence:   
       tcpdump -i eth0 -w /tmp/nvme_tls.pcap port 4420
       nvme connect -t tcp --traddr 192.168.1.10 --trsvcid 4420 --nqn <NQN> --hostnqn <HOSTNQN> --tls \
         --tls_cert /etc/nvme/host.crt --tls_key /etc/nvme/host.key --tls_ca /etc/nvme/ca.crt
